@@ -5,6 +5,8 @@ rendering, text, images, and audio. It calls Win32, Vulkan, and WASAPI directly
 through the Haskell FFI. Shader programs, asset decoding, and audio mixing
 are implemented in Haskell.
 
+[日本語の公式サイトと技術解説](https://m-simplifier.github.io/haskell-game-io/)
+
 ## Build and run
 
 Use GHC and Cabal on Windows x64. The renderer needs a Vulkan 1.3 loader and
