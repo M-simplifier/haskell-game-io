@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Spaceを押す一回の操作から、Haskell Game IOの順序付き入力、SPIR-V生成、Vulkanの資源管理、WASAPI音声とFFIを解説します。">
+  <title>Haskell Game IOの実装</title>
+  <link rel="icon" href="assets/game-io.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="implementation.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">本文へ移動</a>
+  <header class="masthead">
+    <div class="wrap header-inner">
+      <a class="wordmark" href="./">
+        <img src="assets/game-io.svg" alt="" width="32" height="32">
+        <span>Haskell Game IO</span>
+      </a>
+      <nav class="site-nav" aria-label="サイト内">
+        <a href="./#features">特徴</a>
+        <a href="./#projects">動作例</a>
+        <a href="./#start">はじめる</a>
+        <a href="implementation.html" aria-current="page">技術解説</a>
+        <a href="https://github.com/M-simplifier/haskell-game-io">GitHub</a>
+      </nav>
+    </div>
+  </header>
+  <main id="main" tabindex="-1">
+    <header class="article-intro">
+      <div class="wrap">
+        <p class="eyebrow">IMPLEMENTATION / v0.1.0.0</p>
+        <h1>Haskellで描画・音声・入力を実装する</h1>
+        <p class="lede">Windows用のサンプルで<kbd>Space</kbd>を押すと、四角いマーカーの色が変わり、短い音が鳴ります。この操作を手がかりに、Haskellが受け取る入力、GPUへ渡す描画命令、Windowsへ届ける音声を順に見ていきます。</p>
+      </div>
+    </header>
+    <div class="wrap article-layout">
+      <nav class="article-contents" aria-label="技術解説の目次">
+        <details open>
+          <summary>このページの目次</summary>
+          <ol>
+            <li><a href="#space">Spaceを押す</a></li>
+            <li><a href="#input">押下と解放を残す</a></li>
+            <li><a href="#shaders">GPUの計算を書く</a></li>
+            <li><a href="#gpu">GPUの完了を待つ</a></li>
+            <li><a href="#audio">音声の位置を指定する</a></li>
+            <li><a href="#ffi">Windowsを呼ぶ</a></li>
+            <li><a href="#assets">画像と文字を描く</a></li>
+            <li><a href="#validation">検証方法</a></li>
+          </ol>
+        </details>
+      </nav>
+
+      <article class="article-body">
+        <section id="space" aria-labelledby="space-title">
+          <p class="eyebrow">01 / THE SAMPLE</p>
+          <h2 id="space-title">Spaceを押すと何が起きるか</h2>
+          <p>サンプルは窓から時刻と連番付きのイベントを読み取ります。<code>reduceInput</code>は、受け取ったイベントからキーやポインターの状態を更新し、変化の列を返します。<code>update</code>に一件ずつ渡すと、Spaceの押下はマーカーの色を切り替え、鳴らす音の回数を1つ増やします。</p>
+          <pre tabindex="0" aria-label="GettingStartedの入力更新の抜粋"><code>events &lt;- Platform.pollWindowEventsStamped window
+let (input', changes) = Input.reduceInput input events
+let (next, tones) = List.foldl' update (model, 0) (map snd changes)</code></pre>
+          <p>ここまでの状態更新は、同じ入力から同じ値を返す純粋な処理です。その後、サンプルはHaskellで生成したPCMを再生し、<code>renderFrame</code>に新しい色の四角形を渡します。画像や音源のファイルを用意せずに動かせます。</p>
+          <p class="source-links"><a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/examples/GettingStarted.hs#L19-L62">入力、状態更新、再生の呼び出し</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/examples/GettingStarted.hs#L73-L95">四角形と短音を作るコード</a></p>
+        </section>
+
+        <section id="input" aria-labelledby="input-title">
+          <p class="eyebrow">02 / INPUT</p>
+          <h2 id="input-title">フレームの間の押下と解放を残す</h2>
+          <p>次の描画が16ms後だとします。その間に、3msでSpaceの押下、4msで解放を受け付けました。16ms時点ではキーが離れています。押下と解放の2件を残しておくと、ゲームはこの短い操作で色を変えられます。</p>
+          <figure class="diagram" data-input-demo>
+            <ol class="input-timeline" aria-label="入力イベントの時刻">
+              <li data-input-at="0"><strong>0 ms</strong><span>前の描画</span></li>
+              <li data-input-at="3"><strong>3 ms</strong><span>押下を受理</span></li>
+              <li data-input-at="4"><strong>4 ms</strong><span>解放を受理</span></li>
+              <li data-input-at="16"><strong>16 ms</strong><span>次の描画</span></li>
+            </ol>
+            <div class="demo-controls" data-input-controls hidden>
+              <div class="demo-result" role="status">
+                <p><strong data-input-time>0 ms</strong> <span data-input-state>キーは離れている</span></p>
+                <p data-input-events>受け付けた変化はまだありません。</p>
+              </div>
+              <div class="actions">
+                <button type="button" data-input-next>順に見る</button>
+                <button class="secondary" type="button" data-input-reset>最初に戻す</button>
+              </div>
+            </div>
+            <figcaption>この図は用意したイベントをJavaScriptで順に表示します。16msでキーは離れていても、ゲームに渡す列に押下と解放が残ります。</figcaption>
+          </figure>
+          <p>Win32側の窓関数は受信箱に積む時点で時刻を記録し、連番を付けます。同じ時刻に記録した入力も連番順で扱えます。<code>reduceInput</code>の出力は、今の状態と順序付きの変化です。押した瞬間、押したまま、OSの自動リピートを区別し、フォーカスを失ったら残っている押下状態を取り消します。</p>
+          <pre tabindex="0" aria-label="reduceInputの型"><code>reduceInput
+  :: InputState
+  -&gt; [TimedWindowEvent]
+  -&gt; (InputState, [(HostStamp, InputChange)])</code></pre>
+          <p>入力をゲーム内の更新に割り当てるときは、<code>acceptEvents</code>でイベントを蓄え、<code>takeThrough</code>で指定時刻までを取り出せます。締め切った更新に属する入力が遅れて渡されるとエラーを返します。描画間隔、ゲームのtick、音声のフレーム位置は別に扱います。</p>
+          <p>この版のWin32窓関数は確定文字をイベントとして渡します。編集中の文字列と編集終了を表す値は、純粋な入力層の型にあります。</p>
+          <p class="source-links"><a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Platform/Win32.hs#L375-L381">受信時刻と連番</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/GameIO/Input.hs#L40-L62">入力をtickへ割り当てるコード</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/test/PortableLaws.hs#L35-L69">短い押下と分割に関する検査</a></p>
+        </section>
+
+        <section id="shaders" aria-labelledby="shaders-title">
+          <p class="eyebrow">03 / SHADERS</p>
+          <h2 id="shaders-title">Haskellの式でGPUの計算を書く</h2>
+          <p>表面のUV座標を赤と緑に割り当てるフラグメントシェーダーです。<code>MakeVec4</code>で色を作り、青を0、不透明度を1にします。Haskellで組み立てるのはこの計算を表す値です。ライブラリが式をたどり、Vulkanへ渡すSPIR-Vの命令列を生成します。</p>
+          <pre tabindex="0" aria-label="UV座標を色に変えるシェーダー"><code>uvColor :: FragmentShader
+uvColor = FragmentShader $
+  MakeVec4
+    (Component X2 InterpolatedUV)
+    (Component Y2 InterpolatedUV)
+    0
+    1</code></pre>
+          <p>式の型は<code>Expr local stage value</code>です。<code>stage</code>が頂点処理かフラグメント処理かを示し、<code>value</code>が結果の型を示します。頂点を処理する時点で<code>InterpolatedUV</code>を使おうとすると、段階が一致せず、GHCの型検査で止まります。</p>
+          <figure class="diagram">
+            <p class="diagram-head"><strong>Haskellで書いたシェーダー式</strong></p>
+            <ul class="diagram-steps shader-branches">
+              <li><strong>CPUで式を評価する</strong>与えた値から色を計算する</li>
+              <li><strong>SPIR-Vを作ってVulkanに渡す</strong>GPUで描き、画素を読み戻す</li>
+            </ul>
+            <figcaption>両方の結果を、別に計算した期待値と比べます。頂点の出力も、行列やuniformに異なる値を入れて照合します。</figcaption>
+          </figure>
+          <h3>途中の値を表す形で、色が変わった反例</h3>
+          <p>実装中、<code>letExpr</code>の本体で受け取った式を調べると、CPUとGPUが別の色を選ぶ例が見つかりました。たとえば<code>x</code>が<code>FloatLiteral</code>なら赤成分を1にし、その他なら<code>x</code>を赤成分にする本体を書けます。<code>letExpr</code>に0.25を渡したとき、CPUが数値リテラルを渡し、SPIR-V生成側が変数を渡す構成だと、CPUは1、GPUは0.25を選びます。</p>
+          <p>現行版では両方で同じ非公開の<code>Bound</code>を渡します。内部にCPUの評価結果またはGPU命令のIDを持たせるので、本体からは同じ形に見えます。回帰試験は実際に分岐を書くシェーダーを使い、CPUの結果と描画した画素を照合します。</p>
+          <p>また、完結した<code>FragmentShader</code>の式は<code>forall local</code>を要求します。<code>letExpr</code>から受け取った途中の値を別のシェーダーへ持ち出すと、この条件を満たせません。<code>Expr</code>のnominal roleは<code>coerce</code>でこの区別を外す操作も拒否します。</p>
+          <p class="source-links"><a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/GameIO/Graphics/Shader.hs#L128-L169">段階と値の型</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/GameIO/Graphics/Shader.hs#L213-L243">完結した式の型</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/examples/GraphicsSmoke.hs#L119-L170">色と頂点出力の回帰検査</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/tests/compile-fail/ShaderEscapedBinding.hs">GHCが拒否する局所値の持ち出し</a></p>
+        </section>
+
+        <section id="gpu" aria-labelledby="gpu-title">
+          <p class="eyebrow">04 / GPU RESOURCES</p>
+          <h2 id="gpu-title">画像を読む順序と、GPUの完了を管理する</h2>
+          <p>湖面の反射を描くときは、先に反射用の画像Aへ景色を描き、湖面を描く処理がAを読みます。同じ画像に次の反射を書いたとき、計画は前の内容をA₁、新しい内容をA₂と区別します。この番号は、同じ記憶領域に書いたどの内容を読むかを表します。</p>
+          <p><code>planPasses</code>は順に並んだ描画処理の読み書きを調べ、まだ書いていない画像を読む処理や、描画先を同じ処理で読む指定を拒否します。GPUで書いた内容を後の描画が読めるよう、同じキューにVulkanのバリアを入れ、実行段階、メモリ可視性、画像レイアウトを指定します。</p>
+          <figure class="diagram">
+            <dl class="completion-lanes">
+              <div><dt>CPU</dt><dd>描画の命令をキューに渡す</dd><dd>提出が戻り、次の処理へ進む</dd></div>
+              <div><dt>GPUの描画</dt><dd>画像やバッファを読み書きする</dd><dd>描画のfenceで完了を確認</dd></div>
+              <div><dt>画面への提示</dt><dd>swapchainの画像を提示に使う</dd><dd>画像ごとの提示fenceで再利用を確認</dd></div>
+            </dl>
+            <figcaption>描画で使う資源と、提示で使う同期資源は、それぞれの完了を確認してから再利用します。図の列は仕事と確認の区別を示します。</figcaption>
+          </figure>
+          <p>たとえば前の描画がテクスチャを読んでいる間に、その同じ領域を新しい値で上書きすると、前の描画の入力が変わります。Game IOは資源を更新・解放する前に、必要な完了を待ちます。描画fenceと、提示に使ったセマフォを再利用できると判断するためのfenceは別々です。</p>
+          <p>最初の待機で完了が分からなければ、別の待機で確認を試みます。それでも完了が不明な場合、<code>CleanupGate</code>が解放を止め、以後の描画・再利用も拒否します。失敗を注入する試験で、未確認の資源を破棄しない経路を通します。</p>
+          <p class="source-links"><a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/GameIO/Graphics/Plan.hs#L317-L349">画像を読む版と書く版の計画</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Graphics/Vulkan/Resources.hs#L179-L205">画像の遷移</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Graphics/Vulkan/Session.hs#L367-L407">描画と提示の完了確認</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/tests/GraphicsLifetime.hs">待機失敗を注入する検査</a></p>
+        </section>
+
+        <section id="audio" aria-labelledby="audio-title">
+          <p class="eyebrow">05 / AUDIO</p>
+          <h2 id="audio-title">区切りが変わっても同じ位置で音を切り替える</h2>
+          <p>48kHzのステレオ音声では、左と右のサンプルの組が1フレームで、480フレームは10ms分です。先頭を0と数え、127で最初の音を止めて次の音を始めるとします。480フレームを一度に作っても、127フレームを作ってから353フレームを続けても、切替位置は127です。</p>
+          <figure class="diagram" data-audio-demo>
+            <div class="audio-legend">
+              <span><span class="legend-swatch tone-a" aria-hidden="true"></span>音A（0〜126）</span>
+              <span><span class="legend-swatch tone-b" aria-hidden="true"></span>音B（127〜479）</span>
+            </div>
+            <div class="audio-row">
+              <p><strong>一度に作る</strong> <span>480フレーム</span></p>
+              <div class="audio-track" aria-hidden="true"><span class="audio-switch"></span></div>
+            </div>
+            <div class="audio-row">
+              <p><strong>2回に分ける</strong> <span data-audio-blocks>127 ＋ 353フレーム</span></p>
+              <div class="audio-track" data-audio-track aria-hidden="true"><span class="audio-switch"></span><span class="audio-divider"></span></div>
+            </div>
+            <div class="demo-controls" data-audio-controls hidden>
+              <label for="audio-split">下の帯を分ける位置</label>
+              <input id="audio-split" type="range" min="1" max="479" value="127" aria-describedby="audio-split-hint">
+              <p id="audio-split-hint">実線は音が変わる127、点線は2回に分ける位置です。</p>
+            </div>
+            <figcaption>帯はJavaScriptで動かす説明図です。音AとBの境目は127に固定しています。</figcaption>
+          </figure>
+          <p>出力レート、初期状態、音源、命令の絶対位置、演算の順序をそろえます。検査では本番のミキサーを呼び、一括と分割で作ったFloat32のサンプル列と各音の最終状態を比較します。別に書いた有理数時刻の参照と照合すると、停止が1フレームずれた例も区別できます。</p>
+          <p>音源と出力のサンプルレートが異なると、読む位置に端数が生じます。ブロックをまたいで整数の位置と余りを持ち越し、次のブロックの先頭でもその続きから補間します。ストリームの先読みが足りなければ、位相を保って欠損を計上します。</p>
+          <p>MP3の復号表の一部はpuremp3やminimp3から移し、Vorbisは仕様とjfreymuth/vorbisを参照しました。出典とライセンスを公開しています。<a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/licenses/audio-codecs.txt">音声コーデックの出典</a></p>
+          <h3>計算したサンプルを機器へ渡す</h3>
+          <p>WASAPIが空きを知らせると、専用のOSスレッドがバッファを取得し、ミキサーが書き込んだサンプルを返します。<code>withAudio</code>はゲームと同じプロセスでこの処理を行います。<code>withIsolatedAudio</code>は別の実行ファイルを起動し、パイプで命令とPCMを送り、ゲームと機器への配送を別のGHCランタイムで実行します。</p>
+          <p>約120MBの生存ヒープで100回GCを行った隔離試験では、Windowsの出力ミックスで10msのトーン区間を400個連続で取得し、捕捉の不連続と機器キューの空観測は0件でした。同一プロセスで行った試験では空観測が3件ありました。PCMの一致、機器に届く時刻、実際に聞こえる音はそれぞれ観測箇所が異なります。</p>
+          <p class="source-links"><a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/tests/AudioMixer.hs#L27-L121">本番ミキサーと独立参照の検査</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Audio.hs#L101-L114">同一プロセスと別プロセスのAPI</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/docs/audio-validation.md#L63-L91">Windows出力ミックスでの測定条件</a></p>
+        </section>
+
+        <section id="ffi" aria-labelledby="ffi-title">
+          <p class="eyebrow">06 / HASKELL FFI</p>
+          <h2 id="ffi-title">GHCからWindowsへ値とアドレスを渡す</h2>
+          <p>ウィンドウを作る<code>CreateWindowExW</code>は、HaskellのFFIで直接importします。Vulkanは<code>vulkan-1.dll</code>を開き、<code>vkGetInstanceProcAddr</code>などで関数のアドレスを得ます。WASAPIのCOMメソッドは、オブジェクトの仮想関数表の所定の位置からアドレスを読みます。<code>foreign import ccall "dynamic"</code>は、取得した関数ポインターを指定した型で呼ぶ入口です。</p>
+          <h3>ドライバーが読むバイト位置を合わせる</h3>
+          <p>Vulkanの構造体で、先頭に4バイトの<code>sType</code>、続いて8バイトのポインター<code>pNext</code>を置くとします。Win64で<code>pNext</code>の位置は先頭から8バイトです。2つの間に4バイトの空きが入ります。Vulkan用の配置を計算するコードは、フィールドの幅と整列からこの位置を求めます。WASAPIの<code>WAVEFORMATEX</code>は18バイトの詰めた形式なので、別の固定オフセットを使います。</p>
+          <h3>呼び返される間はアドレスを保持する</h3>
+          <p>Windowsがメッセージを通知するときは、逆にHaskellを呼びます。FFIの<code>"wrapper"</code>で窓関数を関数ポインターにして登録します。取得から終了まで同じOSスレッド上に結び、ウィンドウを破棄して窓クラスを登録解除した後でポインターを解放します。</p>
+          <p>音声用のPCMは連続した<code>ForeignPtr Float</code>に置き、<code>withForeignPtr</code>の処理中は領域を生かします。アドレスが動かない領域を確保することと、使っている間に領域を解放しないことは別の仕事です。WASAPIの待機は<code>safe</code> FFIを使い、<code>mask</code>と<code>bracket</code>は、例外が起きるときも取得と返却の順番を守るために使います。</p>
+          <p>この実装では、手書きのC・C++・Rustの中継コードを置かず、GHCが生成するFFIスタブとランタイム、WindowsのAPI、GPUドライバーを使います。</p>
+          <p class="source-links"><a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Graphics/Vulkan/Raw.hs#L99-L143">Vulkan関数のロード</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Audio/WASAPI.hs#L109-L129">COM関数表からの呼び出し</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Graphics/Vulkan/Layout.hs#L1-L80">構造体の配置</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Platform/Win32.hs#L85-L153">窓関数とスレッドの寿命</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Audio/WASAPI.hs#L313-L321">バッファの取得・返却</a></p>
+        </section>
+
+        <section id="assets" aria-labelledby="assets-title">
+          <p class="eyebrow">07 / IMAGES AND TEXT</p>
+          <h2 id="assets-title">ファイルと文字を描ける画素にする</h2>
+          <p>画像は、ファイルの先頭を読んでPNG、JPEG、BMPを判別し、左上から並べたRGBA8の画素に変えます。PNGのDEFLATE展開、行フィルターの復元、JPEGの逆DCTと色変換をHaskellで実行します。JPEGの係数を展開する際は<code>STUArray</code>へ書き込み、<code>runST</code>で更新を関数の内側に閉じます。呼ぶ側には画像かエラーが返ります。</p>
+          <p>日本語のラベルでは、フォントの<code>cmap</code>から文字のグリフ番号を探し、TrueTypeまたはOpenType CFF 1の曲線から輪郭を読みます。輪郭が各画素を覆う割合を求め、文字ごとのマスクを一枚のテクスチャに詰めます。描画、横幅、入力カーソルの計算は同じ<code>GlyphRun</code>を使います。</p>
+          <p>文字配置は横一行を扱います。画像は、PNGの標準色型とビット深度、Adam7、順次およびプログレッシブHuffman JPEG、非圧縮BMPと16・32-bitビットフィールドを対象にしています。ファイル形式ごとの制限は検査資料に記載しています。</p>
+          <p class="source-links"><a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/GameIO/Image.hs#L86-L107">画像の形式判別と寸法の検査</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/GameIO/Image/Jpeg.hs#L22-L55">JPEGの係数処理</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/GameIO/Text.hs#L213-L260">文字配置、幅、カーソル</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/docs/image-compatibility.md">PNGとBMPの画素比較</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/docs/jpeg-validation.md">JPEGの対応範囲と比較</a></p>
+        </section>
+
+        <section id="validation" aria-labelledby="validation-title">
+          <p class="eyebrow">08 / VERIFICATION</p>
+          <h2 id="validation-title">型、数値、Windowsでの結果を照合する</h2>
+          <dl class="capabilities">
+            <div><dt>型検査</dt><dd>シェーダーの局所値を別の式へ持ち出す例をGHCが拒否します。</dd></div>
+            <div><dt>純粋な参照と失敗の注入</dt><dd>入力の分割、音声のサンプル位置、GPU待機が失敗したときの資源解放を個別に検査します。</dd></div>
+            <div><dt>GPUと音声機器</dt><dd>生成したSPIR-Vを検証し、Windows上で描いた画素を読み戻します。音声は出力ミックスと機器キューのカウンターを観測します。</dd></div>
+          </dl>
+          <p>配布ソースを展開した環境で、GHC 9.14.1のビルドと<code>portable-laws</code>、<code>audio-mixer</code>、<code>graphics-lifetime</code>の3本を確認しました。実際のゲーム画面と操作は、Windows上の移植版で確認した結果です。</p>
+          <p class="source-links"><a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/docs/design-contracts.md">設計と検査の条件</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/examples/GraphicsSmoke.hs">実GPUで描いて比較する検査</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/docs/audio-validation.md">音声の実機測定</a> <a href="./#start">公開ソースから試す</a></p>
+        </section>
+      </article>
+    </div>
+  </main>
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <span>Haskell Game IO <span aria-hidden="true">·</span> v0.1.0.0</span>
+      <span><a href="./">トップ</a> <span aria-hidden="true">/</span> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/LICENSE">MITライセンス</a> <span aria-hidden="true">/</span> <a href="https://github.com/M-simplifier/haskell-game-io">GitHub</a></span>
+    </div>
+  </footer>
+</body>
+</html>

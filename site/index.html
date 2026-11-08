@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Haskell Game IOは、Win32、Vulkan、WASAPIを直接呼び出すWindows向けのゲームIOライブラリです。実際のゲーム画面、始め方、実装の仕組みを紹介します。">
+  <title>Haskell Game IO</title>
+  <link rel="icon" href="assets/game-io.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">本文へ移動</a>
+  <header class="masthead">
+    <div class="wrap header-inner">
+      <a class="wordmark" href="./" aria-current="page">
+        <img src="assets/game-io.svg" alt="" width="32" height="32">
+        <span>Haskell Game IO</span>
+      </a>
+      <nav class="site-nav" aria-label="サイト内">
+        <a href="#features">特徴</a>
+        <a href="#projects">動作例</a>
+        <a href="#start">はじめる</a>
+        <a href="implementation.html">技術解説</a>
+        <a href="https://github.com/M-simplifier/haskell-game-io">GitHub</a>
+      </nav>
+    </div>
+  </header>
+  <main id="main" tabindex="-1">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="wrap hero-content">
+        <p class="eyebrow">WINDOWS x64　/　VULKAN 1.3　/　v0.1.0.0</p>
+        <h1 id="hero-title">ゲームの描画・音声・入力を<br class="hero-break">Haskellで扱う</h1>
+        <p class="lede">Haskell Game IOはWindowsのゲーム向けのライブラリです。HaskellのFFIでWin32、Vulkan、WASAPIを直接呼び出し、画面を描き、音を鳴らし、押下と解放を順に受け取ります。</p>
+        <p class="hero-detail">手書きのC・C++・Rustによる中継を置かず、Stillroom、Afterlight、Red Duneを移植しました。</p>
+        <div class="actions">
+          <a class="action" href="#start">サンプルを動かす</a>
+          <a class="action action-secondary" href="implementation.html">仕組みを読む</a>
+        </div>
+      </div>
+      <figure class="wrap hero-media">
+        <img src="assets/stillroom-rail-journey.png" alt="Stillroomの木枠の車内から、草地を抜けて奥へ続く線路を望む" width="1600" height="900" fetchpriority="high">
+        <figcaption>Stillroom <span aria-hidden="true">/</span> Rail Journey <span aria-hidden="true">·</span> Game IO移植版の実描画</figcaption>
+      </figure>
+    </section>
+
+    <section id="projects" class="section wrap" aria-labelledby="projects-title">
+      <p class="eyebrow">01 / PROJECTS</p>
+      <h2 id="projects-title">3つの作品で試した描画と操作</h2>
+      <p class="lede">Win32、Vulkan、WASAPIをHaskellから直接呼び出します。シェーダーの生成、画像や音源の読み込み、文字を描く処理もHaskellで実装し、それぞれの作品で使いました。</p>
+      <div class="feature-grid project-grid">
+        <article>
+          <h3><a href="https://github.com/M-simplifier/stillroom/releases/tag/v0.13.0">Stillroom v0.13.0</a></h3>
+          <p>11の景色を描画し、音楽を再生します。車窓を眺めるJourneyでは、旅の保存、途中下車、再乗車まで移植版で確認しました。</p>
+        </article>
+        <article>
+          <h3><a href="https://github.com/M-simplifier/fp-game-alpha/tree/775f4eb0437a3cc426aee0e5888a38e9432fae35/references/afterlight">Afterlight</a> <span class="subname">余光の庭</span></h3>
+          <p>60Hzのゲーム進行と入力の扱いを保って移植しました。日本語のHUDを表示し、実際の操作、保存、終了まで確認しました。</p>
+        </article>
+        <article>
+          <h3><a href="https://github.com/M-simplifier/fp-game-alpha/tree/775f4eb0437a3cc426aee0e5888a38e9432fae35/references/red-dune">Red Dune</a></h3>
+          <p>20Hzのゲーム進行と、フォーカスを失ったときの一時停止を維持しました。以前の保存を読み、操作してから保存し直せることを確認しました。</p>
+        </article>
+      </div>
+      <figure class="scene">
+        <img src="assets/afterlight-hud.png" alt="Afterlightの庭。木と石の門、空の雲に、日本語の案内と所持品の表示が重なる" width="1600" height="900" loading="lazy">
+        <figcaption>Afterlight <span aria-hidden="true">·</span> 移植版が描画した庭とHUD</figcaption>
+      </figure>
+    </section>
+
+    <section id="features" class="section wrap" aria-labelledby="features-title">
+      <p class="eyebrow">02 / DESIGN</p>
+      <h2 id="features-title">入力の順序、音の時刻、画像の寿命をコードに書く</h2>
+      <div class="feature-grid">
+        <article>
+          <h3>描画の間の押下と解放を残す</h3>
+          <p>受け付けた押下と解放に、時刻と連番を付けます。次に画面を描く時点でキーが離れていても、ゲームは途中の押下を処理できます。</p>
+          <a href="implementation.html#input">入力の仕組みを読む</a>
+        </article>
+        <article>
+          <h3>Haskellの式からSPIR-Vを生成する</h3>
+          <p>頂点とフラグメント、数値とベクトルを型で区別します。式をCPUでも評価し、独立に求めた値やGPUで描いた画素と照合できます。</p>
+          <a href="implementation.html#shaders">シェーダーの仕組みを読む</a>
+        </article>
+        <article>
+          <h3>音の切替位置を音声フレーム番号で指定する</h3>
+          <p>同じ設定で480フレームを一度に作った場合と、127と353に分けた場合を比べます。PCMと次に引き継ぐ状態が一致することを検査しています。</p>
+          <a href="implementation.html#audio">音声の仕組みを読む</a>
+        </article>
+        <article>
+          <h3>GPUが画像を使い終えた時点を確かめる</h3>
+          <p>描画先の画像をいつ書き、いつ読むかを追います。描画と画面への提示には、それぞれの資源を再利用できる時点を確認します。</p>
+          <a href="implementation.html#gpu">GPU資源の仕組みを読む</a>
+        </article>
+      </div>
+    </section>
+
+    <section class="section wrap" aria-labelledby="capabilities-title">
+      <p class="eyebrow">03 / CAPABILITIES</p>
+      <h2 id="capabilities-title">利用できる機能</h2>
+      <dl class="capabilities">
+        <div><dt>描画</dt><dd>Vulkan、保持したメッシュとインスタンス、テクスチャ、画面外への描画、SPIR-V生成。</dd></div>
+        <div><dt>音声</dt><dd>WAV、MP3、Ogg Vorbisの読み込み。ミックス、音量・パン、再サンプリング、オーディオフレーム単位の再生・停止予約。</dd></div>
+        <div><dt>画像</dt><dd>PNG、JPEG、BMPからRGBA8への変換。描画結果をPNGに書き出し。</dd></div>
+        <div><dt>文字</dt><dd>TrueType、TTC、OpenType CFF 1。横一行のグリフ配置、文字幅、入力カーソルの位置。</dd></div>
+        <div><dt>入力・UI</dt><dd>キー、ポインター、確定文字、フォーカス喪失。UIのヒット判定、フォーカス移動、決定操作。</dd></div>
+      </dl>
+      <p class="fine-print">画像と音声の形式には対応範囲があります。文字の配置は横一行を対象にしています。細かな条件は技術解説で確認できます。<a href="implementation.html#assets">画像と文字の対応範囲</a></p>
+    </section>
+
+    <section id="start" class="section wrap" aria-labelledby="start-title">
+      <p class="eyebrow">04 / GET STARTED</p>
+      <h2 id="start-title">Spaceを押して色と音を変える</h2>
+      <div class="split">
+        <div>
+          <p>Windows x64でGHCとCabalを用意し、v0.1.0.0のソースを取得します。以下のビルドと3本のテストは、配布ソースを展開してGHC 9.14.1で確認しました。</p>
+          <p>クリックでマーカーを置き、矢印キーで動かします。<kbd>Space</kbd>を押すと色が変わり、短い音が鳴ります。<kbd>Esc</kbd>で終了します。</p>
+          <p class="source-links">
+            <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/examples/GettingStarted.hs">サンプルのHaskellコード</a>
+            <a href="https://github.com/M-simplifier/haskell-game-io/releases/tag/v0.1.0.0">ソース配布</a>
+          </p>
+        </div>
+        <pre tabindex="0" aria-label="PowerShellでのビルドと実行"><code>git clone --branch v0.1.0.0 https://github.com/M-simplifier/haskell-game-io.git
+cd haskell-game-io
+cabal build all
+cabal test portable-laws audio-mixer graphics-lifetime
+cabal run getting-started</code></pre>
+      </div>
+    </section>
+
+    <section class="section wrap" aria-labelledby="requirements-title">
+      <p class="eyebrow">05 / REQUIREMENTS</p>
+      <h2 id="requirements-title">動作環境と検証範囲</h2>
+      <p>実行にはWindows x64と、Vulkan 1.3のローダーおよびドライバーが必要です。GPU側で動的レンダリング、描画と提示を扱うキュー、D32の深度形式、surfaceとswapchainのmaintenance1拡張の組（KHRまたはEXT）を使います。</p>
+      <p>ライブラリはMITライセンスです。Haskellのコードから、GHCのFFIスタブとランタイムを通じてWindowsとGPUドライバーを呼びます。</p>
+      <p>入力・描画・音声の法則、独立に求めた期待値、実機の画素や音声を、それぞれの試験で照合しました。<a href="implementation.html#validation">何を試験したか読む</a></p>
+    </section>
+  </main>
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <span>Haskell Game IO <span aria-hidden="true">·</span> v0.1.0.0</span>
+      <span><a href="implementation.html">技術解説</a> <span aria-hidden="true">/</span> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/LICENSE">MITライセンス</a> <span aria-hidden="true">/</span> <a href="https://github.com/M-simplifier/haskell-game-io">GitHub</a></span>
+    </div>
+  </footer>
+</body>
+</html>
