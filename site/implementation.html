@@ -3,8 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Spaceを押す一回の操作から、Haskell Game IOの順序付き入力、SPIR-V生成、Vulkanの資源管理、WASAPI音声とFFIを解説します。">
-  <title>Haskell Game IOの実装</title>
+  <meta name="description" content="GCと純粋性があるHaskellで、なぜネイティブな描画・音声・入力が実現できるのか。FFI、メモリの所有権、別プロセスの音声、型付きシェーダーの実装をソースと実測から解説。">
+  <meta name="theme-color" content="#11251f">
+  <title>どうやってHaskellだけで？ — Haskell Game IO 技術解説</title>
   <link rel="icon" href="assets/game-io.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
   <script src="implementation.js" defer></script>
@@ -18,20 +19,22 @@
         <span>Haskell Game IO</span>
       </a>
       <nav class="site-nav" aria-label="サイト内">
-        <a href="./#features">特徴</a>
+        <a href="./#question">なぜ可能？</a>
+        <a href="./#how">その仕組み</a>
         <a href="./#projects">動作例</a>
-        <a href="./#start">はじめる</a>
+        <a href="./#start">試してみる</a>
         <a href="implementation.html" aria-current="page">技術解説</a>
         <a href="https://github.com/M-simplifier/haskell-game-io">GitHub</a>
       </nav>
     </div>
   </header>
   <main id="main" tabindex="-1">
-    <header class="article-intro">
+    <header class="article-intro story-article-intro">
       <div class="wrap">
-        <p class="eyebrow">IMPLEMENTATION / v0.1.0.0</p>
-        <h1>Haskellで描画・音声・入力を実装する</h1>
-        <p class="lede">Windows用のサンプルで<kbd>Space</kbd>を押すと、四角いマーカーの色が変わり、短い音が鳴ります。この操作を手がかりに、Haskellが受け取る入力、GPUへ渡す描画命令、Windowsへ届ける音声を順に見ていきます。</p>
+        <p class="eyebrow">UNDER THE HOOD / v0.1.0.0</p>
+        <h1>「Haskellで全部？」<br><em>仕組みを、見ていこう。</em></h1>
+        <p class="lede">GCのある純粋関数型言語が、どうやってWindowsを呼び、GPUのメモリを扱い、音を途切れさせずに届けるのか。答えは、特別な魔法ではなく、<strong>境界を正しく分ける設計</strong>にあります。</p>
+        <div class="article-intro-links"><a href="#overview">まず全体像を見る</a><a href="#memory">GCとメモリから読む</a><a href="#space">サンプルの一操作を追う</a></div>
       </div>
     </header>
     <div class="wrap article-layout">
@@ -39,6 +42,8 @@
         <details open>
           <summary>このページの目次</summary>
           <ol>
+            <li><a href="#overview">最初に全体像</a></li>
+            <li><a href="#memory">GCと4種類のメモリ</a></li>
             <li><a href="#space">Spaceを押す</a></li>
             <li><a href="#input">押下と解放を残す</a></li>
             <li><a href="#shaders">GPUの計算を書く</a></li>
@@ -52,6 +57,33 @@
       </nav>
 
       <article class="article-body">
+        <section id="overview" aria-labelledby="overview-title" class="article-overview">
+          <p class="eyebrow">00 / THE BIG PICTURE</p>
+          <h2 id="overview-title">純粋なHaskellと、ネイティブな世界。その間に何がある？</h2>
+          <p>「純粋関数型」というのは、OSを呼べないという意味ではありません。<code>update</code>のような純粋関数で次の状態を計算し、実行すべき操作は<code>IO</code>で扱います。さらに<code>foreign import</code>でWindowsの公開ABIを呼べば、C言語で中継プログラムを書く必要はありません。</p>
+          <div class="overview-bands" role="group" aria-label="HaskellからネイティブAPIに到達するまでの3層">
+            <div><span>01 / HASKELL VALUES</span><strong>純粋な計算</strong><p>次のゲーム状態、描画計画、シェーダーの式</p></div>
+            <div><span>02 / HASKELL IO</span><strong>FFI・メモリ操作・同期</strong><p>アドレス、寿命、OSスレッド、GPUの完了待ち</p></div>
+            <div><span>03 / NATIVE APIS</span><strong>Win32・Vulkan・WASAPI</strong><p>OSとドライバーが画面・GPU・音声機器を動かす</p></div>
+          </div>
+          <p>だから「Haskellだけで」は、ゲーム側のロジック、ネイティブAPIを扱う部分、シェーダー生成、コーデック処理までHaskellで書いた、という意味です。<strong>GHCランタイムやOS、GPUドライバーが不要になった</strong>わけではありません。</p>
+          <p>ここから先は二つの道で読めます。低レベルの核心から知りたければ次のメモリの話へ。実際のゲームの流れから知りたければ、<a href="#space">Space一回で色と音が変わる例</a>へ進んでください。</p>
+        </section>
+
+        <section id="memory" aria-labelledby="memory-title" class="article-memory">
+          <p class="eyebrow">00B / THE GC QUESTION</p>
+          <h2 id="memory-title">GCがあっても、すべてのメモリがGC任せではない。</h2>
+          <p>ここが一番大事な区別です。Haskell Game IOのメモリは、全部が同じ場所にあるわけではありません。<strong>誰が所有し、いつ安全に再利用できるか</strong>を領域ごとに決めます。</p>
+          <dl class="memory-regions">
+            <div><dt><span>01 / MANAGED</span>通常のHaskellヒープ</dt><dd>ゲームの状態やリストなど。GHCのGCが生存する値を追跡します。遅延評価によって使い終えた大きな列が残ることがあるため、必要な値を適切な時点で評価します。</dd></div>
+            <div><dt><span>02 / PINNED</span>PCMの連続バッファ</dt><dd><code>mallocForeignPtrArray</code>で移動しない領域を確保します。<code>withForeignPtr</code>でネイティブ側の使用中に寿命を保ちます。ここもGCと完全に無関係ではなく、<code>ForeignPtr</code>の到達可能性が関わります。</dd></div>
+            <div><dt><span>03 / EXPLICIT</span>VulkanのGPUメモリ</dt><dd>VulkanのAPIで確保し、明示的に破棄します。ただしCPUが呼び出しから戻っただけでは、GPUの仕事は終わりません。fenceで完了を確認してから更新・解放します。</dd></div>
+            <div><dt><span>04 / BORROWED</span>WASAPIの出力バッファ</dt><dd>OSから一定の期間だけ借りて書き込み、必ず機器へ返します。途中で例外が起きた場合の返却経路も用意します。所有者はHaskellのGCではなく音声APIです。</dd></div>
+          </dl>
+          <p>さらに、ゲーム側の大きなGC停止が音声側へ伝わらないよう、<code>withIsolatedAudio</code>は別のGHCプロセスを利用できます。<a href="#audio">音声の実測</a>では、ゲーム側で100回major GCを行い、分離した音声の10ms区間400個を連続取得した試験の結果を示しています。</p>
+          <p class="source-links"><a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Audio/PCM.hs#L62-L89">PCMの確保と寿命</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Graphics/Vulkan/Resources.hs#L179-L205">Vulkan資源の同期</a> <a href="#ffi">FFIの実コードと詳しい説明</a></p>
+        </section>
+
         <section id="space" aria-labelledby="space-title">
           <p class="eyebrow">01 / THE SAMPLE</p>
           <h2 id="space-title">Spaceを押すと何が起きるか</h2>

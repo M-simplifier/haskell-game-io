@@ -113,7 +113,10 @@ async function check() {
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath: process.env.CHROMIUM_EXECUTABLE_PATH || undefined,
+  });
   try {
     for (const [device, width, height] of [
       ["desktop", 1440, 1000],
@@ -159,6 +162,8 @@ async function check() {
         assert.ok(contentWidth <= width, `${route} overflows at ${width}px (${contentWidth}px)`);
         await checkLinks(page);
         if (route === "implementation.html") {
+          assert.equal(await page.locator("#overview h2").count(), 1, "Missing overview for new readers");
+          assert.equal(await page.locator("#memory .memory-regions > div").count(), 4, "Missing ownership models");
           await checkDemos(page, device);
           await page.locator(".measurement-method summary").click();
           assert.ok(await page.locator(".measurement-method").evaluate((details) => details.open));
@@ -167,6 +172,10 @@ async function check() {
             await page.locator(".measurement-table").screenshot({ path: join(previews, `measurements-${device}.png`) });
           }
         } else {
+          for (const id of ["question", "features", "how", "projects", "evidence", "start"]) {
+            assert.equal(await page.locator(`#${id} h2`).count(), 1, `Missing story chapter: ${id}`);
+          }
+          assert.equal(await page.locator(".answer-card").count(), 4, "Expected four explanations");
           await page.getByRole("link", { name: "仕組みを読む", exact: true }).click();
           assert.equal(new URL(page.url()).pathname, prefix + "implementation.html");
         }
