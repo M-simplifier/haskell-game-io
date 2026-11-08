@@ -46,7 +46,7 @@
             <li><a href="#audio">音声の位置を指定する</a></li>
             <li><a href="#ffi">Windowsを呼ぶ</a></li>
             <li><a href="#assets">画像と文字を描く</a></li>
-            <li><a href="#validation">検証方法</a></li>
+            <li><a href="#validation">検証方法と実測値</a></li>
           </ol>
         </details>
       </nav>
@@ -58,8 +58,13 @@
           <p>サンプルは窓から時刻と連番付きのイベントを読み取ります。<code>reduceInput</code>は、受け取ったイベントからキーやポインターの状態を更新し、変化の列を返します。<code>update</code>に一件ずつ渡すと、Spaceの押下はマーカーの色を切り替え、鳴らす音の回数を1つ増やします。</p>
           <pre tabindex="0" aria-label="GettingStartedの入力更新の抜粋"><code>events &lt;- Platform.pollWindowEventsStamped window
 let (input', changes) = Input.reduceInput input events
-let (next, tones) = List.foldl' update (model, 0) (map snd changes)</code></pre>
-          <p>ここまでの状態更新は、同じ入力から同じ値を返す純粋な処理です。その後、サンプルはHaskellで生成したPCMを再生し、<code>renderFrame</code>に新しい色の四角形を渡します。画像や音源のファイルを用意せずに動かせます。</p>
+let (next, tones) = List.foldl' update (model, 0) (map snd changes)
+unless (finished next) $ do
+  replicateM_ tones playTone
+  _ &lt;- Graphics.renderFrame renderer (draw next)
+  threadDelay 16000
+  loop window renderer playTone input' next</code></pre>
+          <p><code>update</code>の状態更新は、同じ入力から同じ値を返す純粋な処理です。その後、サンプルはHaskellで生成したPCMを再生し、<code>renderFrame</code>に新しい色の四角形を渡します。<code>threadDelay</code>はこのサンプルの待機です。ゲーム内の時計を進める間隔は、使うゲーム側が決めます。</p>
           <p class="source-links"><a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/examples/GettingStarted.hs#L19-L62">入力、状態更新、再生の呼び出し</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/examples/GettingStarted.hs#L73-L95">四角形と短音を作るコード</a></p>
         </section>
 
@@ -91,7 +96,8 @@ let (next, tones) = List.foldl' update (model, 0) (map snd changes)</code></pre>
   :: InputState
   -&gt; [TimedWindowEvent]
   -&gt; (InputState, [(HostStamp, InputChange)])</code></pre>
-          <p>入力をゲーム内の更新に割り当てるときは、<code>acceptEvents</code>でイベントを蓄え、<code>takeThrough</code>で指定時刻までを取り出せます。締め切った更新に属する入力が遅れて渡されるとエラーを返します。描画間隔、ゲームのtick、音声のフレーム位置は別に扱います。</p>
+          <p>入力をゲーム内の更新に割り当てるときは、<code>acceptEvents</code>でイベントを蓄え、<code>takeThrough</code>で指定時刻までを取り出せます。締め切った更新に属する入力が遅れて届いたり、順序が逆転したりすると、エラーで呼び出し側へ知らせます。同じイベントを一度に渡した結果と、前半の状態を引き継いで分けて渡した結果を、テストで比べています。</p>
+          <p>Afterlightは60Hz、Red Duneは20Hzでゲームの状態を進めます。入力をどの更新に割り当てるか、遅れをどれだけ持ち越すかは、それぞれのゲームの時計に合わせて決めます。</p>
           <p>この版のWin32窓関数は確定文字をイベントとして渡します。編集中の文字列と編集終了を表す値は、純粋な入力層の型にあります。</p>
           <p class="source-links"><a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Platform/Win32.hs#L375-L381">受信時刻と連番</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/GameIO/Input.hs#L40-L62">入力をtickへ割り当てるコード</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/test/PortableLaws.hs#L35-L69">短い押下と分割に関する検査</a></p>
         </section>
@@ -107,7 +113,7 @@ uvColor = FragmentShader $
     (Component Y2 InterpolatedUV)
     0
     1</code></pre>
-          <p>式の型は<code>Expr local stage value</code>です。<code>stage</code>が頂点処理かフラグメント処理かを示し、<code>value</code>が結果の型を示します。頂点を処理する時点で<code>InterpolatedUV</code>を使おうとすると、段階が一致せず、GHCの型検査で止まります。</p>
+          <p>式の型は<code>Expr local stage value</code>です。<code>DataKinds</code>で頂点とフラグメントを<code>stage</code>の型に表し、GADTで、各コンストラクターがどの段階で何成分の値を返すかを定めます。頂点を処理する時点で補間後の<code>InterpolatedUV</code>を使ったり、2成分を4成分として渡したりすると、GHCの型検査で止まります。</p>
           <figure class="diagram">
             <p class="diagram-head"><strong>Haskellで書いたシェーダー式</strong></p>
             <ul class="diagram-steps shader-branches">
@@ -117,9 +123,16 @@ uvColor = FragmentShader $
             <figcaption>両方の結果を、別に計算した期待値と比べます。頂点の出力も、行列やuniformに異なる値を入れて照合します。</figcaption>
           </figure>
           <h3>途中の値を表す形で、色が変わった反例</h3>
-          <p>実装中、<code>letExpr</code>の本体で受け取った式を調べると、CPUとGPUが別の色を選ぶ例が見つかりました。たとえば<code>x</code>が<code>FloatLiteral</code>なら赤成分を1にし、その他なら<code>x</code>を赤成分にする本体を書けます。<code>letExpr</code>に0.25を渡したとき、CPUが数値リテラルを渡し、SPIR-V生成側が変数を渡す構成だと、CPUは1、GPUは0.25を選びます。</p>
+          <p>実装中、<code>letExpr</code>の本体で受け取った式を調べると、CPUとGPUが別の色を選ぶ例が見つかりました。下のように、<code>x</code>が<code>FloatLiteral</code>なら赤成分を1にし、その他なら<code>x</code>を赤成分にする本体を書けます。CPUが数値リテラルを渡し、SPIR-V生成側が変数を渡す構成だと、同じ0.25を渡しても、CPUは1、GPUは0.25を選びます。</p>
+          <p class="fine-print">例は<code>GameIO.Graphics.Shader</code>をimportし、パターン照合に<code>GADTs</code>を指定して試せます。</p>
+          <pre tabindex="0" aria-label="シェーダーの束縛に関する反例"><code>probe :: FragmentShader
+probe = FragmentShader $
+  letExpr 0.25 $ \x -&gt;
+    case x of
+      FloatLiteral _ -&gt; MakeVec4 1 0 0 1
+      _              -&gt; MakeVec4 x 0 0 1</code></pre>
           <p>現行版では両方で同じ非公開の<code>Bound</code>を渡します。内部にCPUの評価結果またはGPU命令のIDを持たせるので、本体からは同じ形に見えます。回帰試験は実際に分岐を書くシェーダーを使い、CPUの結果と描画した画素を照合します。</p>
-          <p>また、完結した<code>FragmentShader</code>の式は<code>forall local</code>を要求します。<code>letExpr</code>から受け取った途中の値を別のシェーダーへ持ち出すと、この条件を満たせません。<code>Expr</code>のnominal roleは<code>coerce</code>でこの区別を外す操作も拒否します。</p>
+          <p>完結した<code>FragmentShader</code>は、<code>RankNTypes</code>で任意の<code>local</code>に対して作れる式を要求します。<code>letExpr</code>から受け取った途中の値は一つの<code>local</code>に結び付くので、別のシェーダーへ持ち出すと型が合いません。さらに<code>RoleAnnotations</code>で<code>Expr</code>のnominal roleを指定し、<code>coerce</code>でこの区別を外す操作も拒否します。</p>
           <p class="source-links"><a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/GameIO/Graphics/Shader.hs#L128-L169">段階と値の型</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/GameIO/Graphics/Shader.hs#L213-L243">完結した式の型</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/examples/GraphicsSmoke.hs#L119-L170">色と頂点出力の回帰検査</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/tests/compile-fail/ShaderEscapedBinding.hs">GHCが拒否する局所値の持ち出し</a></p>
         </section>
 
@@ -137,7 +150,7 @@ uvColor = FragmentShader $
             <figcaption>描画で使う資源と、提示で使う同期資源は、それぞれの完了を確認してから再利用します。図の列は仕事と確認の区別を示します。</figcaption>
           </figure>
           <p>たとえば前の描画がテクスチャを読んでいる間に、その同じ領域を新しい値で上書きすると、前の描画の入力が変わります。Game IOは資源を更新・解放する前に、必要な完了を待ちます。描画fenceと、提示に使ったセマフォを再利用できると判断するためのfenceは別々です。</p>
-          <p>最初の待機で完了が分からなければ、別の待機で確認を試みます。それでも完了が不明な場合、<code>CleanupGate</code>が解放を止め、以後の描画・再利用も拒否します。失敗を注入する試験で、未確認の資源を破棄しない経路を通します。</p>
+          <p>最初の待機で完了が分からなければ、同じ仕事の完了を確認できる別の待機を試みます。それでも完了が不明な場合、<code>CleanupGate</code>が資源と窓を保持し、以後の描画・再利用も拒否します。待機に失敗した場合と<code>VK_ERROR_DEVICE_LOST</code>を区別し、完了不明の資源を破棄しない経路を失敗注入で検査します。</p>
           <p class="source-links"><a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/GameIO/Graphics/Plan.hs#L317-L349">画像を読む版と書く版の計画</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Graphics/Vulkan/Resources.hs#L179-L205">画像の遷移</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Graphics/Vulkan/Session.hs#L367-L407">描画と提示の完了確認</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/tests/GraphicsLifetime.hs">待機失敗を注入する検査</a></p>
         </section>
 
@@ -170,6 +183,7 @@ uvColor = FragmentShader $
           <p>MP3の復号表の一部はpuremp3やminimp3から移し、Vorbisは仕様とjfreymuth/vorbisを参照しました。出典とライセンスを公開しています。<a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/licenses/audio-codecs.txt">音声コーデックの出典</a></p>
           <h3>計算したサンプルを機器へ渡す</h3>
           <p>WASAPIが空きを知らせると、専用のOSスレッドがバッファを取得し、ミキサーが書き込んだサンプルを返します。<code>withAudio</code>はゲームと同じプロセスでこの処理を行います。<code>withIsolatedAudio</code>は別の実行ファイルを起動し、パイプで命令とPCMを送り、ゲームと機器への配送を別のGHCランタイムで実行します。</p>
+          <p><code>readAudioFrame</code>で得るのは、まだ次のパケットに予約されていない最初のフレームです。位置を読んでから再生命令が届くまでに、そのフレームをミキサーが予約することがあります。その場合は<code>AudioFrameAlreadyReserved</code>を返すので、呼び出し側は先の位置を選び直せます。</p>
           <p>約120MBの生存ヒープで100回GCを行った隔離試験では、Windowsの出力ミックスで10msのトーン区間を400個連続で取得し、捕捉の不連続と機器キューの空観測は0件でした。同一プロセスで行った試験では空観測が3件ありました。PCMの一致、機器に届く時刻、実際に聞こえる音はそれぞれ観測箇所が異なります。</p>
           <p class="source-links"><a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/tests/AudioMixer.hs#L27-L121">本番ミキサーと独立参照の検査</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Audio.hs#L101-L114">同一プロセスと別プロセスのAPI</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/docs/audio-validation.md#L63-L91">Windows出力ミックスでの測定条件</a></p>
         </section>
@@ -181,10 +195,16 @@ uvColor = FragmentShader $
           <h3>ドライバーが読むバイト位置を合わせる</h3>
           <p>Vulkanの構造体で、先頭に4バイトの<code>sType</code>、続いて8バイトのポインター<code>pNext</code>を置くとします。Win64で<code>pNext</code>の位置は先頭から8バイトです。2つの間に4バイトの空きが入ります。Vulkan用の配置を計算するコードは、フィールドの幅と整列からこの位置を求めます。WASAPIの<code>WAVEFORMATEX</code>は18バイトの詰めた形式なので、別の固定オフセットを使います。</p>
           <h3>呼び返される間はアドレスを保持する</h3>
-          <p>Windowsがメッセージを通知するときは、逆にHaskellを呼びます。FFIの<code>"wrapper"</code>で窓関数を関数ポインターにして登録します。取得から終了まで同じOSスレッド上に結び、ウィンドウを破棄して窓クラスを登録解除した後でポインターを解放します。</p>
-          <p>音声用のPCMは連続した<code>ForeignPtr Float</code>に置き、<code>withForeignPtr</code>の処理中は領域を生かします。アドレスが動かない領域を確保することと、使っている間に領域を解放しないことは別の仕事です。WASAPIの待機は<code>safe</code> FFIを使い、<code>mask</code>と<code>bracket</code>は、例外が起きるときも取得と返却の順番を守るために使います。</p>
+          <p>Windowsがメッセージを通知するときは、逆にHaskellを呼びます。FFIの<code>"wrapper"</code>で窓関数を関数ポインターにして登録します。窓関数の例外は受信箱に記録し、ゲームループで取り出します。終了時はウィンドウを破棄し、窓クラスの登録を解除してからポインターを解放します。</p>
+          <h3>PCMの領域、位置の計算、出力バッファ</h3>
+          <p>PCMは<code>mallocForeignPtrArray</code>で連続した領域に確保します。GHCが動かさないpinned領域を使い、<code>withForeignPtr</code>でポインターの使用中は領域を生かします。前者はアドレス、後者は寿命のための指定です。</p>
+          <p>音源のフレーム位置と補間の余りは、内側のループのbang patternで厳密に評価します。これで、まだ計算していない式を反復ごとにためずに位置を進めます。ミキサーはWASAPIから借りた可変バッファへ各音を直接足し、最後に出力範囲へ収めます。</p>
+          <p>Afterlightでは、GPUにメッシュを送った後も、インデックス数を取り出す未評価の式がCPU側の頂点とインデックスの列を参照していました。登録時に個数を評価する変更を入れたビルドでは、送信後にGCをかけた時点の生存ヒープが約1,291MBから50.5MBになりました。1600×900、Full品質で5フレームを描いた非表示の起動診断です。累積割り当ては前後とも約7.36GBで、後のビルドにはシェーダーAPIの変更も含まれます。</p>
+          <h3>OSスレッドと、例外が入る場所を決める</h3>
+          <p>ウィンドウは<code>runInBoundThread</code>で同じOSスレッドに結び、操作時にもスレッドIDを照合します。音声は<code>-threaded</code>のGHCランタイムで<code>forkOSWithUnmask</code>を使い、専用のOSスレッドでCOMの初期化、機器待ち、バッファの取得と返却を行います。機器待ちのFFIを<code>safe</code>にすることで、その間も別のHaskellスレッドを動かせます。</p>
+          <p><code>bracket</code>で取得と解放を組にします。WASAPIのパケットでは<code>mask</code>で取得・返却の境界を非同期例外から守り、サンプルを書く間は中断を許します。書き込みが例外で止まった場合は、無音のパケットとして機器へ返す経路があります。</p>
           <p>この実装では、手書きのC・C++・Rustの中継コードを置かず、GHCが生成するFFIスタブとランタイム、WindowsのAPI、GPUドライバーを使います。</p>
-          <p class="source-links"><a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Graphics/Vulkan/Raw.hs#L99-L143">Vulkan関数のロード</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Audio/WASAPI.hs#L109-L129">COM関数表からの呼び出し</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Graphics/Vulkan/Layout.hs#L1-L80">構造体の配置</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Platform/Win32.hs#L85-L153">窓関数とスレッドの寿命</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Audio/WASAPI.hs#L313-L321">バッファの取得・返却</a></p>
+          <p class="source-links"><a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Graphics/Vulkan/Raw.hs#L99-L143">Vulkan関数のロード</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Audio/WASAPI.hs#L109-L129">COM関数表からの呼び出し</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Graphics/Vulkan/Layout.hs#L1-L80">構造体の配置</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Platform/Win32.hs#L85-L153">窓関数とスレッドの寿命</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Audio/PCM.hs#L62-L89">PCMの確保</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Audio/Mixer.hs#L383-L415">サンプルを加算するループ</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Graphics/Vulkan/Resources.hs#L256-L281">メッシュの登録時に評価するコード</a> <a href="https://github.com/M-simplifier/fp-game-alpha/blob/4674cb2e12471251c6efc2de4ace296683f3377c/references/afterlight/runtime/Garden/Runtime.hs#L233-L242">起動診断の計測項目</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Audio/Local.hs#L77-L110">音声の専用スレッド</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Audio/WASAPI.hs#L313-L321">パケットの取得・返却</a></p>
         </section>
 
         <section id="assets" aria-labelledby="assets-title">
@@ -192,8 +212,9 @@ uvColor = FragmentShader $
           <h2 id="assets-title">ファイルと文字を描ける画素にする</h2>
           <p>画像は、ファイルの先頭を読んでPNG、JPEG、BMPを判別し、左上から並べたRGBA8の画素に変えます。PNGのDEFLATE展開、行フィルターの復元、JPEGの逆DCTと色変換をHaskellで実行します。JPEGの係数を展開する際は<code>STUArray</code>へ書き込み、<code>runST</code>で更新を関数の内側に閉じます。呼ぶ側には画像かエラーが返ります。</p>
           <p>日本語のラベルでは、フォントの<code>cmap</code>から文字のグリフ番号を探し、TrueTypeまたはOpenType CFF 1の曲線から輪郭を読みます。輪郭が各画素を覆う割合を求め、文字ごとのマスクを一枚のテクスチャに詰めます。描画、横幅、入力カーソルの計算は同じ<code>GlyphRun</code>を使います。</p>
-          <p>文字配置は横一行を扱います。画像は、PNGの標準色型とビット深度、Adam7、順次およびプログレッシブHuffman JPEG、非圧縮BMPと16・32-bitビットフィールドを対象にしています。ファイル形式ごとの制限は検査資料に記載しています。</p>
-          <p class="source-links"><a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/GameIO/Image.hs#L86-L107">画像の形式判別と寸法の検査</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/GameIO/Image/Jpeg.hs#L22-L55">JPEGの係数処理</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/GameIO/Text.hs#L213-L260">文字配置、幅、カーソル</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/docs/image-compatibility.md">PNGとBMPの画素比較</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/docs/jpeg-validation.md">JPEGの対応範囲と比較</a></p>
+          <p>設定画面のボタンをクリックしたとき、<code>hitTest</code>は座標に重なる有効な項目から最前面のIDを返します。<code>stepUI</code>に現在のフォーカスと操作を渡すと、次のフォーカスと決定された項目を返します。項目を削除したり無効にしたりすると、古いフォーカスは決定操作の対象から外れます。この更新は純粋関数なので、画面を開かずに同じ配置と操作で試せます。</p>
+          <p>文字配置は横一行を扱い、入力カーソルはUnicodeスカラーで数えます。画像は、PNGの標準色型とビット深度、Adam7、順次およびプログレッシブHuffman JPEG、非圧縮BMPと16・32-bitビットフィールドを対象にしています。ファイル形式ごとの制限は検査資料に記載しています。</p>
+          <p class="source-links"><a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/GameIO/Image.hs#L86-L107">画像の形式判別と寸法の検査</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/GameIO/Image/Jpeg.hs#L22-L55">JPEGの係数処理</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/GameIO/Text.hs#L213-L260">文字配置、幅、カーソル</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/GameIO/UI.hs#L71-L106">当たり判定とフォーカスの更新</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/docs/image-compatibility.md">PNGとBMPの画素比較</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/docs/jpeg-validation.md">JPEGの対応範囲と比較</a></p>
         </section>
 
         <section id="validation" aria-labelledby="validation-title">
@@ -206,6 +227,45 @@ uvColor = FragmentShader $
           </dl>
           <p>配布ソースを展開した環境で、GHC 9.14.1のビルドと<code>portable-laws</code>、<code>audio-mixer</code>、<code>graphics-lifetime</code>の3本を確認しました。実際のゲーム画面と操作は、Windows上の移植版で確認した結果です。</p>
           <p class="source-links"><a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/docs/design-contracts.md">設計と検査の条件</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/examples/GraphicsSmoke.hs">実GPUで描いて比較する検査</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/docs/audio-validation.md">音声の実機測定</a> <a href="./#start">公開ソースから試す</a></p>
+          <h3 id="performance">同じWindows機で測った3つの例</h3>
+          <p>CPUはIntel Core i7-13620H、GPUはNVIDIA GeForce RTX 3050 6GB Laptop GPUです。p95は、各回の値を小さい順に並べ、累積の割合が95％以上になる最初の値です。</p>
+          <table class="measurement-table" aria-labelledby="performance">
+            <thead>
+              <tr><th scope="col">試験</th><th scope="col">条件</th><th scope="col">観測した値</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">公開ソースのビルド</th>
+                <td>v0.1.0.0の展開直後。GHC 9.14.1、Cabal 3.18.2.0、依存準備済みで1回。</td>
+                <td><strong>25.56秒</strong>。続けて3本のテストが8.03秒で合格。</td>
+              </tr>
+              <tr>
+                <th scope="row">Afterlightの歩行と視点移動</th>
+                <td>1600×900、Full品質。Windows経由で移動、ジャンプ、視点移動を入力。各回101フレーム、3回。</td>
+                <td>フレーム間隔のp95 <strong>14.58〜15.49ms</strong>。GPUコマンドのp95 12.55〜13.11ms。</td>
+              </tr>
+              <tr>
+                <th scope="row">Stillroomの音声供給</th>
+                <td>0.13.0への移植中の検査ビルド。約53秒の消音試験。画面、音源供給、WASAPIを3プロセスに分離。</td>
+                <td><strong>4,713パケット</strong>を送信。供給不足のフレーム、パディング予算超過、機器周期超過は各0。機器キューの空観測は1回。</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="source-links"><a href="assets/afterlight-frames.csv" download>Afterlightの303フレーム分のCSV</a></p>
+          <details class="measurement-method">
+            <summary>測定方法と実行版</summary>
+            <h4>公開ソースのビルド</h4>
+            <p>配布tar.gzのハッシュを照合して展開し、<code>cabal build all</code>の開始から終了までを計りました。展開や依存の準備はその前に済ませました。テストの時間には3本のコンパイルとリンク、実行を含めています。</p>
+            <p class="source-links"><a href="https://github.com/M-simplifier/haskell-game-io/releases/tag/v0.1.0.0">配布したソース</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/README.md#L8-L24">ビルドとテストの手順</a></p>
+            <h4>Afterlight</h4>
+            <p>GHC 9.14.1、RTS <code>-N2</code>の統合ビルドで、同じ音声ワーカーと素材を使いました。フレーム15〜115を採りました。フレーム間隔は連続するゲームループ開始時刻の差、GPU時間は描画コマンド列の先頭と末尾のVulkanタイムスタンプの差です。</p>
+            <p class="fine-print">実行ファイルのSHA-256 <code>AEA276A2E44FB5B7ADEA6594FD4F96A4C86305FC720E40C02F4A300643CBF164</code></p>
+            <p class="source-links"><a href="https://github.com/M-simplifier/fp-game-alpha/blob/4674cb2e12471251c6efc2de4ace296683f3377c/references/afterlight/runtime/Garden/Runtime.hs#L742-L758">フレーム間隔の記録</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Graphics.hs#L896-L907">GPUタイムスタンプ</a></p>
+            <h4>Stillroom</h4>
+            <p>GHC 9.6.7、<code>-O2</code>、RTS <code>-N2</code>の検査用ビルドで、非表示の<code>--check</code>を実行しました。景色、旅、音楽の切り替えなど56項目を通り、画面側のメジャーGCの最大停止は253.5msでした。キューの空観測は、WASAPIへ送るときパディングが0だった回数です。</p>
+            <p class="fine-print">実行ファイルのSHA-256 <code>787199D19E68F9819A57F7159A3BA259DAA8C56B3A85C19C047807D1EAC92247</code></p>
+            <p class="source-links"><a href="https://github.com/M-simplifier/stillroom/blob/e8fecad3717c92e05533c54f4b6fcc21c2b0c7c4/runtime/Stillroom/Runtime/Desktop.hs#L1007-L1014">検査で記録する項目</a> <a href="https://github.com/M-simplifier/haskell-game-io/blob/19dde99dc005aceafae934d7178d2b5ecf517e54/src/native/GameIO/Audio/Local.hs#L200-L225">音声カウンターの定義</a></p>
+          </details>
         </section>
       </article>
     </div>

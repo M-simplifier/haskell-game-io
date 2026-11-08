@@ -16,6 +16,7 @@ const mediaTypes = {
   ".png": "image/png",
   ".webp": "image/webp",
   ".jpg": "image/jpeg",
+  ".csv": "text/csv; charset=utf-8",
 };
 
 const server = createServer(async (request, response) => {
@@ -44,13 +45,18 @@ async function checkLinks(page) {
       url.hash = "";
       if (!seen.has(url.href)) {
         const response = await fetch(url);
-        const target = response.ok
-          ? new DOMParser().parseFromString(await response.text(), "text/html")
-          : null;
-        seen.set(url.href, target);
+        let ids = null;
+        if (response.ok) {
+          ids = new Set();
+          if (response.headers.get("content-type")?.startsWith("text/html")) {
+            const target = new DOMParser().parseFromString(await response.text(), "text/html");
+            for (const element of target.querySelectorAll("[id]")) ids.add(element.id);
+          }
+        }
+        seen.set(url.href, ids);
       }
       const target = seen.get(url.href);
-      if (!target || (id && !target.getElementById(id))) broken.push(anchor.getAttribute("href"));
+      if (!target || (id && !target.has(id))) broken.push(anchor.getAttribute("href"));
     }
     return broken;
   });
@@ -90,6 +96,11 @@ async function checkDemos(page, device) {
   await slider.press("ArrowLeft");
   assert.equal(await blocks.textContent(), "478 ＋ 2フレーム");
   if (device !== "narrow") {
+    await slider.evaluate((element) => {
+      element.value = "240";
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+      element.blur();
+    });
     await page.locator("[data-audio-demo]").screenshot({ path: join(previews, `audio-${device}.png`) });
   }
 }
@@ -129,13 +140,18 @@ async function check() {
           image.loading = "eager";
           return image.decode();
         })));
-        await page.screenshot({
-          path: join(previews, `${route.slice(0, -5)}-${device}-full.png`),
-          fullPage: true,
-          animations: "disabled",
-        });
         if (device !== "narrow") {
-          await page.screenshot({ path: join(previews, `${route.slice(0, -5)}-${device}.png`) });
+          await page.screenshot({
+            path: join(previews, `${route.slice(0, -5)}-${device}.png`),
+            animations: "disabled",
+          });
+        }
+        if (device === "desktop" || (device === "mobile" && route === "index.html")) {
+          await page.screenshot({
+            path: join(previews, `${route.slice(0, -5)}-${device}-full.png`),
+            fullPage: true,
+            animations: "disabled",
+          });
         }
         assert.equal(await page.locator("h1").count(), 1, `Heading on ${route}`);
         assert.equal(await page.locator("html").getAttribute("lang"), "ja");
@@ -144,8 +160,14 @@ async function check() {
         await checkLinks(page);
         if (route === "implementation.html") {
           await checkDemos(page, device);
+          await page.locator(".measurement-method summary").click();
+          assert.ok(await page.locator(".measurement-method").evaluate((details) => details.open));
+          assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+          if (device !== "narrow") {
+            await page.locator(".measurement-table").screenshot({ path: join(previews, `measurements-${device}.png`) });
+          }
         } else {
-          await page.getByRole("link", { name: "仕組みを読む" }).click();
+          await page.getByRole("link", { name: "仕組みを読む", exact: true }).click();
           assert.equal(new URL(page.url()).pathname, prefix + "implementation.html");
         }
         assert.deepEqual(errors, [], `Browser errors on ${route}`);

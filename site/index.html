@@ -28,18 +28,24 @@
   <main id="main" tabindex="-1">
     <section class="hero" aria-labelledby="hero-title">
       <div class="wrap hero-content">
-        <p class="eyebrow">WINDOWS x64　/　VULKAN 1.3　/　v0.1.0.0</p>
-        <h1 id="hero-title">ゲームの描画・音声・入力を<br class="hero-break">Haskellで扱う</h1>
-        <p class="lede">Haskell Game IOはWindowsのゲーム向けのライブラリです。HaskellのFFIでWin32、Vulkan、WASAPIを直接呼び出し、画面を描き、音を鳴らし、押下と解放を順に受け取ります。</p>
-        <p class="hero-detail">手書きのC・C++・Rustによる中継を置かず、Stillroom、Afterlight、Red Duneを移植しました。</p>
-        <div class="actions">
-          <a class="action" href="#start">サンプルを動かす</a>
-          <a class="action action-secondary" href="implementation.html">仕組みを読む</a>
+        <div class="hero-heading">
+          <p class="eyebrow">WINDOWS x64　/　VULKAN 1.3　/　v0.1.0.0</p>
+          <h1 id="hero-title">描画も、音も、入力も。<br>Haskellで動かす。</h1>
+        </div>
+        <div class="hero-aside">
+          <p>Haskell Game IOはWindowsのゲーム向けのライブラリです。HaskellのFFIでWin32、Vulkan、WASAPIを直接呼び出し、画面を描き、音を鳴らし、押下と解放を順に受け取ります。</p>
+          <p class="hero-detail">手書きのC・C++・Rustによる中継を置かず、Stillroom、Afterlight、Red Duneを移植しました。</p>
+          <div class="actions">
+            <a class="action" href="#start">サンプルを動かす</a>
+            <a class="action action-secondary" href="implementation.html">仕組みを読む</a>
+          </div>
         </div>
       </div>
       <figure class="wrap hero-media">
-        <img src="assets/stillroom-rail-journey.png" alt="Stillroomの木枠の車内から、草地を抜けて奥へ続く線路を望む" width="1600" height="900" fetchpriority="high">
-        <figcaption>Stillroom <span aria-hidden="true">/</span> Rail Journey <span aria-hidden="true">·</span> Game IO移植版の実描画</figcaption>
+        <a class="image-link" href="assets/stillroom-rail-journey.png" aria-label="Stillroomの車窓を原寸表示">
+          <img src="assets/stillroom-rail-journey.png" alt="Stillroomの木枠の車内から、草地を抜けて奥へ続く線路を望む" width="1600" height="900" fetchpriority="high">
+        </a>
+        <figcaption class="image-caption"><span>Stillroom <span aria-hidden="true">/</span> Rail Journey <span aria-hidden="true">·</span> Game IO移植版の実描画</span><span>画像を選ぶと原寸表示</span></figcaption>
       </figure>
     </section>
 
@@ -62,8 +68,10 @@
         </article>
       </div>
       <figure class="scene">
-        <img src="assets/afterlight-hud.png" alt="Afterlightの庭。木と石の門、空の雲に、日本語の案内と所持品の表示が重なる" width="1600" height="900" loading="lazy">
-        <figcaption>Afterlight <span aria-hidden="true">·</span> 移植版が描画した庭とHUD</figcaption>
+        <a class="image-link" href="assets/afterlight-hud.png" aria-label="Afterlightの庭とHUDを原寸表示">
+          <img src="assets/afterlight-hud.png" alt="Afterlightの庭。木と石の門、空の雲に、日本語の案内と所持品の表示が重なる" width="1600" height="900" loading="lazy">
+        </a>
+        <figcaption class="image-caption"><span>Afterlight <span aria-hidden="true">·</span> 移植版が描画した庭とHUD</span><span>画像を選ぶと原寸表示</span></figcaption>
       </figure>
     </section>
 
