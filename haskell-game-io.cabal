@@ -9,12 +9,16 @@ license-file: LICENSE
 author: Masaya Shirasawa and contributors
 maintainer: M-simplifier
 build-type: Simple
-tested-with: GHC == 9.14.1
+tested-with: GHC == 9.6.7, GHC == 9.14.1
 extra-doc-files: README.md, docs/design-contracts.md, docs/audio-validation.md,
     docs/jpeg-validation.md, docs/image-compatibility.md, licenses/audio-codecs.txt
 extra-source-files: AGENTS.md, tests/AudioCodecs.hs, tests/AudioNative.hs,
     tests/JpegCheck.hs, tests/ImageCompatibility.hs, tests/image-compatibility-fixtures.py,
     tests/compile-fail/ShaderEscapedBinding.hs
+
+source-repository head
+  type: git
+  location: https://github.com/M-simplifier/haskell-game-io
 
 common checked
   default-language: GHC2021
@@ -160,6 +164,15 @@ executable graphics-smoke
   main-is: GraphicsSmoke.hs
   ghc-options: -threaded -rtsopts
   build-depends: bytestring, haskell-game-io:core, haskell-game-io:graphics
+  if !(os(windows) && arch(x86_64))
+    buildable: False
+
+executable getting-started
+  import: checked
+  hs-source-dirs: examples
+  main-is: GettingStarted.hs
+  ghc-options: -threaded -rtsopts
+  build-depends: haskell-game-io:audio, haskell-game-io:core, haskell-game-io:graphics
   if !(os(windows) && arch(x86_64))
     buildable: False
 

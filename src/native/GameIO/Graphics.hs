@@ -48,6 +48,8 @@ module GameIO.Graphics
   , renderPassesReadback
   , renderOffscreen
   , rendererLastMetrics
+  , rendererLastSubmission
+  , waitRenderer
   , module GameIO.Graphics.Plan
   ) where
 
@@ -126,6 +128,7 @@ data FrameMetrics = FrameMetrics
   , frameSubmitNSec :: !Word64
   , framePresentCallNSec :: !Word64
   , frameGPUNSec :: !(Maybe Double)
+  , frameSubmissionIndex :: !Word64
   } deriving (Eq, Show)
 
 data GraphicsError
@@ -221,6 +224,7 @@ data Renderer = Renderer
   , rendererNextAsset :: !(IORef Int)
   , rendererInFlightMetrics :: !(IORef (Maybe FrameMetrics))
   , rendererCompletedMetrics :: !(IORef (Maybe FrameMetrics))
+  , rendererSubmissionIndex :: !(IORef Word64)
   }
 
 withRenderer :: Window -> (Renderer -> IO a) -> IO a
@@ -247,7 +251,7 @@ openRenderer scope window session = do
     <*> pure commands <*> pure available <*> pure acquireFence <*> newIORef False <*> pure drawFence <*> newIORef False
     <*> pure query <*> newIORef Nothing <*> newIORef False <*> newIORef Nothing <*> newIORef Nothing
     <*> newIORef IntMap.empty
-    <*> newIORef 0 <*> newIORef Nothing <*> newIORef Nothing
+    <*> newIORef 0 <*> newIORef Nothing <*> newIORef Nothing <*> newIORef 0
   where
     fns = sessionFns session
     device = sessionDevice session
@@ -520,8 +524,18 @@ renderOffscreen renderer passes = mask_ $ do
       `onException` writeIORef (rendererHealth renderer) Faulted
     commitTargets prepared
 
+-- | Metrics for the most recently collected graphics submission.
 rendererLastMetrics :: Renderer -> IO (Maybe FrameMetrics)
 rendererLastMetrics renderer = readIORef (rendererCompletedMetrics renderer)
+
+-- | Sequence number assigned after a successful window frame submission.
+rendererLastSubmission :: Renderer -> IO Word64
+rendererLastSubmission = readIORef . rendererSubmissionIndex
+
+-- | Wait for pending graphics work and collect its timestamps. Swapchain
+-- presentation uses its own completion tracking within the renderer scope.
+waitRenderer :: Renderer -> IO ()
+waitRenderer renderer = mask_ (requireRenderer renderer >> awaitDraw renderer)
 
 render :: Renderer -> [RenderPass] -> Frame -> Bool -> IO (FrameStatus, Maybe FramePixels)
 render renderer passes frame wantsPixels = mask_ $ do
@@ -538,7 +552,7 @@ render renderer passes frame wantsPixels = mask_ $ do
       (targetPasses, geometry) <- preparePasses renderer (surfaceFormat (generationConfig ready)) passes frame
       staging <- if wantsPixels then Just <$> readbackBuffer renderer ready else pure Nothing
       prepareEnd <- getMonotonicTimeNSec
-      let metrics = FrameMetrics (prepareEnd - prepareStart) (waitEnd - waitStart) 0 0 0 Nothing
+      let metrics = FrameMetrics (prepareEnd - prepareStart) (waitEnd - waitStart) 0 0 0 Nothing 0
       (renderReady renderer ready targetPasses frame geometry staging metrics)
         `onException` writeIORef (rendererHealth renderer) Faulted
 
@@ -844,6 +858,7 @@ renderReady renderer generation passes frame geometry readback metrics = alloca 
       resetFence session (rendererDrawFence renderer)
       submitDraw session commands (rendererAvailable renderer) (presentSemaphore image) (rendererDrawFence renderer)
       writeIORef (rendererDrawPending renderer) True
+      submission <- atomicModifyIORef' (rendererSubmissionIndex renderer) (\n -> (n+1, n+1))
       commitTargets passes
       presentStart <- getMonotonicTimeNSec
       shown <- present session swapchain image index
@@ -852,6 +867,7 @@ renderReady renderer generation passes frame geometry readback metrics = alloca 
         { frameEncodeNSec = submitStart - encodeStart
         , frameSubmitNSec = presentStart - submitStart
         , framePresentCallNSec = presentEnd - presentStart
+        , frameSubmissionIndex = submission
         }
       when (acquired == VK_SUBOPTIMAL_KHR || shown == VK_SUBOPTIMAL_KHR || shown == VK_ERROR_OUT_OF_DATE_KHR) markResize
       status <- case shown of
