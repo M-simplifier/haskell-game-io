@@ -1,0 +1,49 @@
+GameIO audio codec source attribution
+
+Ogg encapsulation follows RFC 3533.
+https://www.rfc-editor.org/rfc/rfc3533
+
+Vorbis follows the Xiph.Org Vorbis I specification. The setup, floor,
+residue and channel routing implementations also consulted the MIT
+jfreymuth/vorbis implementation at
+8e67b20ce3e838bb7a92123fe7992a25b9fcdbfe.
+GameIO's inverse transform uses a separately implemented radix-2 FFT
+and DCT-IV reduction.
+https://xiph.org/vorbis/doc/Vorbis_I_spec.html
+https://github.com/jfreymuth/vorbis/tree/8e67b20ce3e838bb7a92123fe7992a25b9fcdbfe
+
+Copyright (c) 2016 Johann Freymuth
+
+The Layer III Huffman trees and synthesis window in Mp3Tables.hs are
+transcribed from Herschel/puremp3 at eeb913d6f61cd3ae77aa4d8cb38c6cb3f0f58602.
+That project lists Mike Welsh as author and licenses its code under MIT or
+CC0. This distribution preserves its MIT notice below. GameIO computes the
+IMDCT and synthesis cosine tables from the transform equations.
+https://github.com/Herschel/puremp3/tree/eeb913d6f61cd3ae77aa4d8cb38c6cb3f0f58602
+
+The Layer III scale-factor band widths were transcribed from lieff/minimp3
+under CC0 1.0. The reference minimp3.h had SHA-256
+57e437c5c1f0e8b243885d3929c8973b5e6c778451e0100ab4251d19915cb3ad.
+Its scalefactor grouping and intensity-stereo rules were also consulted.
+https://github.com/lieff/minimp3
+https://creativecommons.org/publicdomain/zero/1.0/
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

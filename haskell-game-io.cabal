@@ -1,0 +1,203 @@
+cabal-version: 3.0
+name: haskell-game-io
+version: 0.1.0.0
+synopsis: Native Windows game IO in Haskell
+description: Direct Windows game IO with Haskell-owned state and rendering.
+category: Game
+license: MIT
+license-file: LICENSE
+author: Masaya Shirasawa and contributors
+maintainer: M-simplifier
+build-type: Simple
+tested-with: GHC == 9.14.1
+extra-doc-files: README.md, docs/design-contracts.md, docs/audio-validation.md,
+    docs/jpeg-validation.md, docs/image-compatibility.md, licenses/audio-codecs.txt
+extra-source-files: AGENTS.md, tests/AudioCodecs.hs, tests/AudioNative.hs,
+    tests/JpegCheck.hs, tests/ImageCompatibility.hs, tests/image-compatibility-fixtures.py,
+    tests/compile-fail/ShaderEscapedBinding.hs
+
+common checked
+  default-language: GHC2021
+  ghc-options: -Wall -Wcompat -Wincomplete-uni-patterns -Wincomplete-record-updates
+  build-depends: base >= 4.18 && < 4.23
+
+library core
+  import: checked
+  visibility: public
+  hs-source-dirs: src
+  exposed-modules:
+    GameIO.Graphics.Plan
+    GameIO.Graphics.Shader
+    GameIO.Image
+    GameIO.Input
+    GameIO.Input.Event
+    GameIO.Text
+    GameIO.Text.Atlas
+    GameIO.UI
+  other-modules:
+    GameIO.Image.Deflate
+    GameIO.Image.Jpeg
+    GameIO.Image.Jpeg.Raster
+    GameIO.Image.Jpeg.Syntax
+    GameIO.Text.Binary
+    GameIO.Text.CFF
+    GameIO.Text.Outline
+    GameIO.Text.Raster
+    GameIO.Text.TrueType
+  build-depends:
+    array >= 0.5 && < 0.6,
+    bytestring >= 0.11 && < 0.13,
+    containers >= 0.6 && < 0.9,
+    transformers >= 0.6 && < 0.7
+
+library
+  import: checked
+  hs-source-dirs: src/native
+  exposed-modules: GameIO
+  build-depends: haskell-game-io:audio, haskell-game-io:core, haskell-game-io:graphics
+  reexported-modules:
+    GameIO.Audio,
+    GameIO.Graphics,
+    GameIO.Graphics.Plan,
+    GameIO.Graphics.Shader,
+    GameIO.Image,
+    GameIO.Input,
+    GameIO.Input.Event,
+    GameIO.Platform,
+    GameIO.Platform.Borderless,
+    GameIO.Platform.Icon,
+    GameIO.Text,
+    GameIO.Text.Atlas,
+    GameIO.Text.Render,
+    GameIO.UI
+  if !(os(windows) && arch(x86_64))
+    buildable: False
+
+library graphics
+  import: checked
+  visibility: public
+  hs-source-dirs: src/native
+  exposed-modules:
+    GameIO.Graphics
+    GameIO.Platform
+    GameIO.Platform.Borderless
+    GameIO.Platform.Icon
+    GameIO.Text.Render
+  other-modules:
+    GameIO.Graphics.Vulkan.Layout
+    GameIO.Graphics.Vulkan.Lifetime
+    GameIO.Graphics.Vulkan.Pipeline
+    GameIO.Graphics.Vulkan.Raw
+    GameIO.Graphics.Vulkan.Resources
+    GameIO.Graphics.Vulkan.Session
+    GameIO.Platform.Win32
+  build-depends:
+    bytestring >= 0.11 && < 0.13,
+    containers >= 0.6 && < 0.9,
+    haskell-game-io:core
+  if os(windows) && arch(x86_64)
+    extra-libraries: gdi32, kernel32, user32
+  else
+    buildable: False
+
+library audio
+  import: checked
+  ghc-options: -O2
+  visibility: public
+  hs-source-dirs: src/native
+  exposed-modules: GameIO.Audio
+  other-modules:
+    GameIO.Audio.Codec.Mp3
+    GameIO.Audio.Codec.Mp3DSP
+    GameIO.Audio.Codec.Mp3Frames
+    GameIO.Audio.Codec.Mp3Tables
+    GameIO.Audio.Codec.Ogg
+    GameIO.Audio.Codec.Source
+    GameIO.Audio.Codec.Vorbis
+    GameIO.Audio.Codec.VorbisDSP
+    GameIO.Audio.Codec.VorbisSetup
+    GameIO.Audio.Isolated
+    GameIO.Audio.Local
+    GameIO.Audio.Mixer
+    GameIO.Audio.PCM
+    GameIO.Audio.Protocol
+    GameIO.Audio.Types
+    GameIO.Audio.WASAPI
+    GameIO.Audio.Wav
+  build-depends:
+    array >= 0.5 && < 0.6,
+    binary >= 0.8 && < 0.9,
+    bytestring >= 0.11 && < 0.13,
+    containers >= 0.6 && < 0.9,
+    process >= 1.6 && < 1.7,
+    transformers >= 0.6 && < 0.7
+  if os(windows) && arch(x86_64)
+    extra-libraries: avrt, kernel32, ole32
+  else
+    buildable: False
+
+executable audio-smoke
+  import: checked
+  hs-source-dirs: examples
+  main-is: AudioSmoke.hs
+  ghc-options: -threaded -rtsopts
+  build-depends: haskell-game-io:audio
+  if !(os(windows) && arch(x86_64))
+    buildable: False
+
+executable gameio-audio-worker
+  import: checked
+  hs-source-dirs: app
+  main-is: AudioWorker.hs
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N2
+  build-depends: haskell-game-io:audio
+  if !(os(windows) && arch(x86_64))
+    buildable: False
+
+executable graphics-smoke
+  import: checked
+  hs-source-dirs: examples
+  main-is: GraphicsSmoke.hs
+  ghc-options: -threaded -rtsopts
+  build-depends: bytestring, haskell-game-io:core, haskell-game-io:graphics
+  if !(os(windows) && arch(x86_64))
+    buildable: False
+
+executable font-check
+  import: checked
+  hs-source-dirs: tools
+  main-is: FontCheck.hs
+  build-depends: bytestring, containers, haskell-game-io:core, text >= 2.0 && < 2.2
+
+test-suite portable-laws
+  import: checked
+  type: exitcode-stdio-1.0
+  main-is: PortableLaws.hs
+  hs-source-dirs: test
+  build-depends: bytestring, haskell-game-io:core
+
+test-suite audio-mixer
+  import: checked
+  type: exitcode-stdio-1.0
+  main-is: AudioMixer.hs
+  hs-source-dirs: tests, src/native
+  other-modules:
+    GameIO.Audio.Codec.Source
+    GameIO.Audio.Mixer
+    GameIO.Audio.PCM
+    GameIO.Audio.Types
+    GameIO.Audio.Wav
+  build-depends: binary, bytestring, containers
+
+test-suite graphics-lifetime
+  import: checked
+  type: exitcode-stdio-1.0
+  main-is: GraphicsLifetime.hs
+  hs-source-dirs: tests, src/native
+  other-modules:
+    GameIO.Graphics.Vulkan.Lifetime
+    GameIO.Graphics.Vulkan.Raw
+  if os(windows) && arch(x86_64)
+    extra-libraries: kernel32
+  else
+    buildable: False
